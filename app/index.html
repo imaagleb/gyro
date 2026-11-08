@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GyroSynth — музыка из гироскопа</title>
+<style>
+  :root{--bg:#05070a;--panel:#0f172a;--accent:#22d3ee;--accent2:#a855f7;--text:#e2e8f0;--muted:#94a3b8;--danger:#ef4444;--ok:#22c55e;}
+  *{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);overflow:hidden}
+  canvas#bg{position:fixed;inset:0;z-index:0;display:block}
+  .wrap{position:relative;z-index:10;height:100vh;display:grid;grid-template-columns:340px 1fr;gap:0}
+  .sidebar{background:var(--panel);border-right:1px solid #1e293b;padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+  .main{position:relative;overflow:hidden}
+  h2{font-size:14px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px}
+  .card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:14px}
+  .row{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+  label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+  input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
+  .val{font-size:11px;font-variant-numeric:tabular-nums;color:var(--accent);min-width:44px;text-align:right}
+  button{width:100%;padding:10px;border-radius:8px;border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;cursor:pointer;font-size:14px}
+  button.recording{background:var(--danger);border-color:var(--danger);color:#fff;animation:pulse 1.2s infinite}
+  button:active{transform:scale(0.98)}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+  .toggle{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .switch{position:relative;width:44px;height:24px;background:#374151;border-radius:12px;cursor:pointer}
+  .switch::after{content:'';position:absolute;top:2px;left:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:.2s}
+  .switch.on{background:var(--ok)}.switch.on::after{transform:translateX(20px)}
+  .status{font-size:11px;color:var(--muted);margin-top:6px;min-height:14px}
+  .gyro-readout{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+  .g-box{background:#0b1120;border:1px solid #1f2937;border-radius:10px;padding:8px;text-align:center}
+  .g-box .name{font-size:10px;color:var(--muted)}
+  .g-box .num{font-size:18px;font-variant-numeric:tabular-nums;color:var(--accent)}
+  .canvas-box{position:absolute;inset:0;pointer-events:none}
+  canvas#viz{width:100%;height:100%;display:block}
+  .hint{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:12px;pointer-events:none;text-align:center;z-index:5}
+  @media (max-width:768px){.wrap{grid-template-columns:1fr}.sidebar{border-right:none;border-bottom:1px solid #1e293b;max-height:42vh}}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="wrap">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <div style="width:32px;height:32px;background:radial-gradient(circle at 30% 30%,#22d3ee,#0891b2);border-radius:8px"></div>
+      <div style="font-weight:800;font-size:18px;letter-spacing:-.5px">Gyro<span style="color:var(--accent)">Synth</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Датчик / источник углов</h2>
+      <div class="toggle"><span>Гироскоп устройства</span><div class="switch" id="swSensor" onclick="toggleSensor(this)"></div></div>
+      <div class="status" id="stSensor">Ожидание разрешений…</div>
+      <button id="btnRequest" style="display:none">Разрешить датчики</button>
+      <div class="gyro-readout">
+        <div class="g-box"><div class="name">X (tilt)</div><div class="num" id="gx">0.0°</div></div>
+        <div class="g-box"><div class="name">Y (tilt)</div><div class="num" id="gy">0.0°</div></div>
+        <div class="g-box"><div class="name">Z (yaw)</div><div class="num" id="gz">0.0°</div></div>
+      </div>
+      <div style="margin-top:8px"><label>Симуляция гироскопа</label><input type="range" id="simRate" min="0" max="3" step="0.01" value="0.8"></div>
+    </div>
+
+    <div class="card">
+      <h2>Основной осциллятор</h2>
+      <div class="row"><label>Частота (Гц)</label><div class="val" id="vFreq">220</div></div>
+      <div class="row"><input type="range" id="freq" min="40" max="1200" step="1" value="220"></div>
+      <div class="row"><label>Тимбр</label><div class="val" id="vType">Sine</div></div>
+      <div class="row"><button id="btnWave" style="width:auto;padding:6px 12px;font-size:12px">Sine</button></div>
+      <div class="row"><label>Громкость</label><div class="val" id="vVol">0.5</div></div>
+      <div class="row"><input type="range" id="vol" min="0" max="1" step="0.01" value="0.5"></div>
+    </div>
+
+    <div class="card">
+      <h2>LFO (на углах гироскопа)</h2>
+      <div class="row"><label>Глубина модуляции</label><div class="val" id="vDepth">50</div></div>
+      <div class="row"><input type="range" id="depth" min="0" max="400" step="1" value="50"></div>
+      <div class="row"><label>Угол источника LFO</label><div class="val" id="vLfoSrc">X</div></div>
+      <div class="row"><button id="btnLfoSrc" style="width:auto;padding:6px 12px;font-size:12px">X (tilt)</button></div>
+      <div class="row"><label>Цель модуляции</label><div class="val" id="vTarget">Частота</div></div>
+      <div class="row"><button id="btnTarget" style="width:auto;padding:6px 12px;font-size:12px">Частота (Hz)</button></div>
+      <div class="row"><label>Сглаживание угла</label><div class="val" id="vSmooth">0.85</div></div>
+      <div class="row"><input type="range" id="smooth" min="0" max="0.99" step="0.01" value="0.85"></div>
+    </div>
+
+    <div class="card">
+      <h2>Эффекты</h2>
+      <div class="row"><label>Реверб</label><div class="val" id="vVerb">15</div></div>
+      <div class="row"><input type="range" id="verb" min="0" max="100" step="1" value="15"></div>
+      <div class="row"><label>Делей (мс)</label><div class="val" id="vDelay">180</div></div>
+      <div class="row"><input type="range" id="delay" min="0" max="600" step="10" value="180"></div>
+      <div class="row"><label>Фильтр LP (Гц)</label><div class="val" id="vLp">8000</div></div>
+      <div class="row"><input type="range" id="lp" min="200" max="12000" step="100" value="8000"></div>
+    </div>
+
+    <div class="card">
+      <h2>Запись</h2>
+      <button id="btnRec" style="background:#1f2937;border-color:#374151;color:#fff">Запись WAV (off)</button>
+      <div class="status" id="stRec">Готово</div>
+    </div>
+
+    <div class="card">
+      <h2>ESP / COM-порт</h2>
+      <div class="row"><label>Порт</label><div class="val" id="vSerialPort">—</div></div>
+      <div class="row"><select id="serialSelect" style="width:100%"></select></div>
+      <div class="row"><button id="btnConnectSerial" style="width:auto;padding:6px 12px;font-size:12px">Подключить ESP</button></div>
+      <div class="status" id="stSerial">Порт не выбран</div>
+    </div>
+  <section class="main">
+    <div class="canvas-box"><canvas id="viz"></canvas></div>
+    <div class="hint">Наклоните устройство или двигайте мышкой — углы гироскопа управляют LFO синусоиды</div>
+  </section>
+</div>
+<script>
+/* ==================== STATE ==================== */
+const state = {
+  audioCtx: null, master: null, osc: null, lfoOsc: null, lfoGain: null,
+  freqGain: null, lpFilter: null, convolver: null, verbNode: null,
+  delayNode: null, delayGain: null, feedback: null, dest: null, recorder: null,
+  chunks: [], isRecording: false,
+  freq: 220, vol: 0.5, waveType: 'sine', depth: 50,
+  lfoSrc: 'x', target: 'freq', smooth: 0.85,
+  verb: 15, delayMs: 180, lp: 8000,
+  gyro: {x:0,y:0,z:0}, smoothed: {x:0,y:0,z:0},
+  simRate: 0.8, simTime: 0, sensorActive: false,
+  mouseX: 0.5, mouseY: 0.5, time: 0,
+  serialPort: null, serialReader: null, serialConnected: false
+};
+
+const els = {
+  gx: document.getElementById('gx'), gy: document.getElementById('gy'), gz: document.getElementById('gz'),
+  stSensor: document.getElementById('stSensor'), btnRequest: document.getElementById('btnRequest'),
+  swSensor: document.getElementById('swSensor'),
+  freq: document.getElementById('freq'), vFreq: document.getElementById('vFreq'),
+  vol: document.getElementById('vol'), vVol: document.getElementById('vVol'),
+  depth: document.getElementById('depth'), vDepth: document.getElementById('vDepth'),
+  smooth: document.getElementById('smooth'), vSmooth: document.getElementById('vSmooth'),
+  verb: document.getElementById('verb'), vVerb: document.getElementById('vVerb'),
+  delay: document.getElementById('delay'), vDelay: document.getElementById('vDelay'),
+  lp: document.getElementById('lp'), vLp: document.getElementById('vLp'),
+  simRate: document.getElementById('simRate'),
+  serialSelect: document.getElementById('serialSelect'),
+  btnConnectSerial: document.getElementById('btnConnectSerial'),
+  vSerialPort: document.getElementById('vSerialPort'),
+  stSerial: document.getElementById('stSerial'),
+  btnWave: document.getElementById('btnWave'), vType: document.getElementById('vType'),
+  btnLfoSrc: document.getElementById('btnLfoSrc'), vLfoSrc: document.getElementById('vLfoSrc'),
+  btnTarget: document.getElementById('btnTarget'), vTarget: document.getElementById('vTarget'),
+  btnRec: document.getElementById('btnRec'), stRec: document.getElementById('stRec')
+};
+
+/* ==================== AUDIO ==================== */
+function initAudio(){
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if(!Ctx) return alert('Web Audio API не поддерживается этим браузером');
+  state.audioCtx = new Ctx();
+  state.master = state.audioCtx.createGain();
+  state.master.gain.value = state.vol;
+  state.master.connect(state.audioCtx.destination);
+  state.dest = state.audioCtx.createMediaStreamDestination();
+  state.master.connect(state.dest);
+  state.lpFilter = state.audioCtx.createBiquadFilter();
+  state.lpFilter.type = 'lowpass';
+  state.lpFilter.frequency.value = state.lp;
+  state.lpFilter.connect(state.master);
+  state.convolver = state.audioCtx.createConvolver();
+  state.convolver.buffer = generateImpulseResponse(state.audioCtx, 1.5);
+  state.verbNode = state.audioCtx.createGain();
+  state.verbNode.gain.value = state.verb / 100;
+  state.convolver.connect(state.verbNode);
+  state.verbNode.connect(state.master);
+  state.delayNode = state.audioCtx.createDelay(1);
+  state.delayNode.delayTime.value = state.delayMs / 1000;
+  state.delayGain = state.audioCtx.createGain();
+  state.delayGain.gain.value = 0.35;
+  state.feedback = state.audioCtx.createGain();
+  state.feedback.gain.value = 0.3;
+  state.delayNode.connect(state.delayGain);
+  state.delayGain.connect(state.feedback);
+  state.feedback.connect(state.delayNode);
+  state.delayGain.connect(state.master);
+  state.osc = state.audioCtx.createOscillator();
+  state.osc.type = state.waveType;
+  state.osc.frequency.setValueAtTime(state.freq, state.audioCtx.currentTime);
+  state.osc.connect(state.lpFilter);
+  state.lfoOsc = state.audioCtx.createOscillator();
+  state.lfoOsc.type = 'sine';
+  state.lfoOsc.frequency.setValueAtTime(5, state.audioCtx.currentTime);
+  state.lfoGain = state.audioCtx.createGain();
+  state.lfoGain.gain.value = state.depth;
+  state.lfoOsc.connect(state.lfoGain);
+  state.lfoOsc.start();
+  state.freqGain = state.audioCtx.createGain();
+  state.freqGain.gain.value = 0;
+  state.lfoGain.connect(state.freqGain);
+  state.freqGain.connect(state.osc.frequency);
+  state.osc.start();
+  updateEffects();
+  draw();
+}
+
+function generateImpulseResponse(ctx, duration){
+  const len = ctx.sampleRate * duration;
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for(let ch=0;ch<2;ch++){
+    const d = buf.getChannelData(ch);
+    for(let i=0;i<len;i++){
+      const t = i/ctx.sampleRate;
+      d[i] = (Math.random()*2-1) * Math.exp(-t * 6);
+    }
+  }
+  return buf;
+}
+
+function updateEffects(){
+  if(!state.audioCtx) return;
+  state.master.gain.value = state.vol;
+  state.lpFilter.frequency.value = state.lp;
+  state.verbNode.gain.value = state.verb / 100;
+  state.delayNode.delayTime.value = state.delayMs / 1000;
+  state.osc.type = state.waveType;
+}
+
+function setFreq(v){
+  state.freq = Math.max(40,Math.min(1200,v));
+  if(state.osc) state.osc.frequency.setValueAtTime(state.freq, state.audioCtx.currentTime);
+}
+function setDepth(v){
+  state.depth = v;
+  if(state.lfoGain) state.lfoGain.gain.setValueAtTime(v, state.audioCtx.currentTime);
+}
+function setLfoRate(v){
+  if(state.lfoOsc) state.lfoOsc.frequency.setValueAtTime(v, state.audioCtx.currentTime);
+}
+/* ==================== GYRO / INPUT ==================== */
+function updateGyroUI(){
+  document.getElementById('gx').textContent = state.gyro.x.toFixed(1)+'°';
+  document.getElementById('gy').textContent = state.gyro.y.toFixed(1)+'°';
+  document.getElementById('gz').textContent = state.gyro.z.toFixed(1)+'°';
+}
+function smoothGyro(){
+  const s = state.smooth;
+  state.smoothed.x = s*state.smoothed.x + (1-s)*state.gyro.x;
+  state.smoothed.y = s*state.smoothed.y + (1-s)*state.gyro.y;
+  state.smoothed.z = s*state.smoothed.z + (1-s)*state.gyro.z;
+}
+function getLfoAngle(){
+  if(state.lfoSrc === 'x') return state.smoothed.x;
+  if(state.lfoSrc === 'y') return state.smoothed.y;
+  return state.smoothed.z;
+}
+async function requestSensors(){
+  try{
+    if(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      await DeviceOrientationEvent.requestPermission();
+      window.addEventListener('deviceorientation', onDeviceOrientation);
+    }
+    if(window.Gyroscope){
+      const gyro = new Gyroscope({frequency: 60});
+      gyro.addEventListener('reading', ()=>{
+        state.gyro = {x: gyro.x, y: gyro.y, z: gyro.z};
+        state.sensorActive = true;
+      });
+      gyro.start();
+    }
+    state.sensorActive = true;
+    els.stSensor.textContent = 'Датчик активен';
+    els.stSensor.style.color = 'var(--ok)';
+    els.swSensor.classList.add('on');
+    els.btnRequest.style.display = 'none';
+  }catch(err){
+    els.stSensor.textContent = 'Датчик недоступен — режим мыши / симуляции';
+    els.stSensor.style.color = 'var(--muted)';
+    state.sensorActive = false;
+  }
+}
+function onDeviceOrientation(e){
+  state.gyro = {x: e.beta || 0, y: e.gamma || 0, z: e.alpha || 0};
+  state.sensorActive = true;
+}
+function toggleSensor(btn){
+  state.sensorActive = !state.sensorActive;
+  btn.classList.toggle('on');
+  if(state.sensorActive){
+    els.stSensor.textContent = 'Датчик активен';
+    els.stSensor.style.color = 'var(--ok)';
+    if(!window.DeviceOrientationEvent && !window.Gyroscope) requestSensors();
+  } else {
+    els.stSensor.textContent = 'Датчик выключен';
+    els.stSensor.style.color = 'var(--muted)';
+  }
+}
+els.btnRequest.addEventListener('click', requestSensors);
+window.addEventListener('mousemove', e=>{
+  state.mouseX = e.clientX / window.innerWidth;
+  state.mouseY = e.clientY / window.innerHeight;
+  if(!state.sensorActive && !state.serialConnected){
+    state.gyro.x = (state.mouseY - 0.5) * 90;
+    state.gyro.y = (state.mouseX - 0.5) * 90;
+    state.gyro.z = Math.sin(Date.now()/1000) * 45;
+  }
+});
+window.addEventListener('keydown', e=>{
+  if(!state.audioCtx) initAudio();
+  const map = {z:130,x:146,c:164,v:174,b:196,n:220,m:247,q:261,w:293,e:329,r:349,t:392,y:440,u:493,i:523};
+  const note = map[e.key.toLowerCase()];
+  if(note) setFreq(note);
+});
+/* ==================== CONTROLS ==================== */
+function bind(id, cb){
+  const el = document.getElementById(id);
+  el.addEventListener('input', ()=>cb(el.value));
+  el.addEventListener('change', ()=>cb(el.value));
+}
+bind('freq', v=>{ state.freq = +v; els.vFreq.textContent = v; setFreq(state.freq); });
+bind('vol', v=>{ state.vol = +v; els.vVol.textContent = v; if(state.master) state.master.gain.value = state.vol; });
+bind('depth', v=>{ state.depth = +v; els.vDepth.textContent = v; setDepth(state.depth); });
+bind('smooth', v=>{ state.smooth = +v; els.vSmooth.textContent = v; });
+bind('verb', v=>{ state.verb = +v; els.vVerb.textContent = v; updateEffects(); });
+bind('delay', v=>{ state.delayMs = +v; els.vDelay.textContent = v; updateEffects(); });
+bind('lp', v=>{ state.lp = +v; els.vLp.textContent = v; updateEffects(); });
+bind('simRate', v=>{ state.simRate = +v; });
+let waveTypes = ['sine','square','sawtooth','triangle']; let wi = 0;
+els.btnWave.addEventListener('click', ()=>{
+  wi = (wi + 1) % waveTypes.length;
+  state.waveType = waveTypes[wi];
+  els.vType.textContent = state.waveType.toUpperCase();
+  els.btnWave.textContent = state.waveType.toUpperCase();
+  updateEffects();
+});
+let srcs = ['x','y','z']; let si = 0;
+els.btnLfoSrc.addEventListener('click', ()=>{
+  si = (si + 1) % srcs.length;
+  state.lfoSrc = srcs[si];
+  const names = {x:'X (tilt)', y:'Y (tilt)', z:'Z (yaw)'};
+  els.vLfoSrc.textContent = names[state.lfoSrc];
+  els.btnLfoSrc.textContent = names[state.lfoSrc];
+});
+let targets = ['freq','amp','filter']; let ti = 0;
+els.btnTarget.addEventListener('click', ()=>{
+  ti = (ti + 1) % targets.length;
+  state.target = targets[ti];
+  const names = {freq:'Частота (Hz)', amp:'Амплитуда', filter:'Фильтр'};
+  els.vTarget.textContent = names[state.target];
+  els.btnTarget.textContent = names[state.target];
+});
+els.btnRec.addEventListener('click', ()=>{
+  if(!state.audioCtx) initAudio();
+  if(state.isRecording){
+    state.isRecording = false;
+    els.btnRec.classList.remove('recording');
+    els.btnRec.textContent = 'Запись WAV (off)';
+    els.stRec.textContent = 'Экспорт…';
+    exportWav();
+  } else {
+    state.chunks = [];
+    state.isRecording = true;
+    els.btnRec.classList.add('recording');
+    els.btnRec.textContent = 'Идёт запись…';
+    els.stRec.textContent = 'Запись активна';
+  }
+});
+function exportWav(){
+  if(state.chunks.length === 0){ els.stRec.textContent = 'Нет данных'; return; }
+  const blob = new Blob(state.chunks, {type:'audio/wav'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'gyrosynth-recording.wav';
+  a.click();
+  els.stRec.textContent = 'Сохранено: gyrosynth-recording.wav';
+}
+/* ==================== SERIAL (ESP) ==================== */
+async function listSerialPorts(){
+  if(!navigator.serial){ els.stSerial.textContent = 'Web Serial не поддерживается'; return; }
+  const ports = await navigator.serial.getPorts();
+  els.serialSelect.innerHTML = '';
+  if(ports.length === 0){
+    els.vSerialPort.textContent = '—';
+    els.stSerial.textContent = 'Порты не найдены';
+    return;
+  }
+  ports.forEach((p,i)=>{
+    const o = document.createElement('option');
+    o.value = i;
+    const info = p.getInfo();
+    o.textContent = `USB ${info.usbVendorId || '?'}:${info.usbProductId || '?'}`;
+    els.serialSelect.appendChild(o);
+  });
+  els.stSerial.textContent = 'Выберите порт и нажмите Подключить';
+}
+
+async function connectSerial(){
+  if(!navigator.serial){ return; }
+  if(state.serialPort){
+    try{ state.serialReader.releaseLock(); state.serialPort.close(); }catch(e){}
+    state.serialPort = null; state.serialReader = null; state.serialConnected = false;
+    state.sensorActive = false;
+    els.btnConnectSerial.textContent = 'Подключить ESP';
+    els.stSerial.textContent = 'Отключено';
+    els.swSensor.classList.remove('on');
+    return;
+  }
+  const idx = +els.serialSelect.value;
+  const ports = await navigator.serial.getPorts();
+  if(!ports[idx]){ els.stSerial.textContent = 'Порт не выбран'; return; }
+  try{
+    state.serialPort = ports[idx];
+    await state.serialPort.open({ baudRate: 115200 });
+    const decoder = new TextDecoderStream();
+    state.serialPort.readable.pipeTo(decoder.writable);
+    state.serialReader = decoder.readable.getReader();
+    state.serialConnected = true;
+    state.sensorActive = true;
+    els.btnConnectSerial.textContent = 'Отключить ESP';
+    els.stSerial.textContent = 'ESP подключён';
+    els.swSensor.classList.add('on');
+    readSerialLoop();
+  }catch(e){
+    els.stSerial.textContent = 'Ошибка подключения';
+    console.error(e);
+  }
+}
+
+function parseSerialLine(line){
+  const m = line.match(/X:([-\d.]+)\s+Y:([-\d.]+)\s+Z:([-\d.]+)/);
+  if(!m) return;
+  state.gyro.x = parseFloat(m[1]);
+  state.gyro.y = parseFloat(m[2]);
+  state.gyro.z = parseFloat(m[3]);
+}
+
+async function readSerialLoop(){
+  try{
+    while(true){
+      const {value, done} = await state.serialReader.read();
+      if(done) break;
+      const lines = value.split('\n');
+      lines.forEach(l=>{ if(l.trim()) parseSerialLine(l.trim()); });
+    }
+  }catch(e){
+    state.serialConnected = false;
+    els.stSerial.textContent = 'Потеряно соединение';
+    console.error(e);
+  }
+}
+
+els.btnConnectSerial.addEventListener('click', connectSerial);
+
+/* ==================== VISUALIZATION ==================== */
+const viz = document.getElementById('viz');
+const ctx = viz.getContext('2d');
+let w,h;
+function resize(){ w = viz.width = viz.parentElement.clientWidth; h = viz.height = viz.parentElement.clientHeight; }
+window.addEventListener('resize', resize);
+resize();
+const bufSize = 512;
+const waveBuf = new Float32Array(bufSize);
+function draw(){
+  const now = performance.now()/1000;
+  state.time = now;
+  if(!state.sensorActive && !state.serialConnected){
+    state.simTime += state.simRate * 0.015;
+    state.gyro.x = Math.sin(state.simTime) * 40 + Math.sin(state.simTime*2.3)*10;
+    state.gyro.y = Math.cos(state.simTime*1.7) * 30;
+    state.gyro.z = Math.sin(state.simTime*0.9) * 60;
+  }
+  smoothGyro();
+  updateGyroUI();
+  const angle = getLfoAngle();
+  const lfoMod = angle / 90;
+  if(state.lfoOsc){
+    const rate = 2 + Math.abs(lfoMod) * 6;
+    setLfoRate(rate);
+    if(state.target === 'amp' && state.master){
+      state.master.gain.setTargetAtTime(state.vol * (0.4 + 0.6*Math.abs(lfoMod)), state.audioCtx.currentTime, 0.1);
+    }
+    if(state.target === 'filter' && state.lpFilter){
+      state.lpFilter.frequency.setTargetAtTime(600 + Math.abs(lfoMod) * 7000, state.audioCtx.currentTime, 0.1);
+    }
+  }
+  ctx.clearRect(0,0,w,h);
+  const cx = w*0.5, cy = h*0.5, r = Math.min(w,h)*0.32;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx-r,cy); ctx.lineTo(cx+r,cy);
+  ctx.moveTo(cx,cy-r); ctx.lineTo(cx,cy+r);
+  ctx.strokeStyle = '#374151'; ctx.lineWidth = 1; ctx.stroke();
+  const vx = cx + Math.sin(state.smoothed.z/180*Math.PI)*r*0.8;
+  const vy = cy - Math.sin(state.smoothed.x/180*Math.PI)*r*0.8;
+  ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(vx,vy);
+  ctx.strokeStyle = 'var(--accent)'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.beginPath(); ctx.arc(vx,vy,5,0,Math.PI*2);
+  ctx.fillStyle = 'var(--accent)'; ctx.fill();
+  if(state.audioCtx){
+    for(let i=0;i<bufSize;i++){
+      const phase = (i/bufSize)*Math.PI*2;
+      const lfo = Math.sin(now*5) * (state.depth/400);
+      const f = state.freq + lfo * 60 * (angle/90);
+      waveBuf[i] = Math.sin(phase * (f/110)) * 0.5;
+    }
+  }
+  const ampY = h*0.72;
+  ctx.beginPath();
+  for(let i=0;i<bufSize;i++){
+    const x = (i/bufSize)*w;
+    const y = ampY + waveBuf[i] * 40 * (state.depth/100);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle = 'var(--accent2)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '12px system-ui';
+  ctx.fillText(`LFO угол: ${state.lfoSrc.toUpperCase()} = ${angle.toFixed(1)}°`, 16, 30);
+  ctx.fillText(`База: ${state.freq} Гц | Симуляция: ${state.simRate.toFixed(2)}`, 16, h-20);
+  requestAnimationFrame(draw);
+}
+/* ==================== BOOT ==================== */
+window.addEventListener('load', ()=>{
+  const start = ()=>{
+    if(!state.audioCtx) initAudio();
+    if(state.audioCtx.state === 'suspended') state.audioCtx.resume();
+    document.removeEventListener('pointerdown', start);
+    document.removeEventListener('keydown', start);
+  };
+  document.addEventListener('pointerdown', start);
+  document.addEventListener('keydown', start);
+  if(/Mobi|Android/i.test(navigator.userAgent)){
+    els.btnRequest.style.display = 'block';
+  } else {
+    requestSensors();
+  }
+  listSerialPorts();
+  draw();
+});
+</body>
+</html>
