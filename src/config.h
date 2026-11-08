@@ -13,16 +13,16 @@
 
 // --- WiFi ---
 // Change these to match your iPhone hotspot credentials
-#define WIFI_SSID     "iPhone"
-#define WIFI_PASS     ""
+#define WIFI_SSID     "Самсунг 2"
+#define WIFI_PASS     "11111111"
 
 // Fallback AP if hotspot is not found
 #define FALLBACK_AP_SSID  "GYRO_LOG"
 #define FALLBACK_AP_PASS  "12345678"
 
 // --- I2C ---
-#define I2C_SDA_PIN  20
-#define I2C_SCL_PIN  21
+#define I2C_SDA_PIN  8
+#define I2C_SCL_PIN  9
 #define I2C_FREQ     400000L
 
 // --- Sampling ---
@@ -30,11 +30,11 @@
 #define SAMPLE_MS       (1000 / SAMPLE_HZ)
 
 // --- Gyro range: ±250, ±500, ±1000, ±2000 dps ---
-#define GYRO_RANGE      GYRO_RANGE_500DPS
+#define GYRO_RANGE      MPU6050_RANGE_500_DEG
 #define GYRO_SCALE      50.0f   // value * 0.02 = dps
 
 // --- Accel range: ±2, ±4, ±8, ±16 g ---
-#define ACCEL_RANGE     ACCELRANGE_4G
+#define ACCEL_RANGE     MPU6050_RANGE_4_G
 #define ACCEL_SCALE     1000.0f  // value * 0.001 = g
 
 // --- Complementary filter ---

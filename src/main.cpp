@@ -150,6 +150,7 @@ static void wifiConnectStep() {
 
     case ST_SCAN:
       setLED(255, 255, 0);  // yellow — scanning
+      Serial.println("  Scanning WiFi networks...");
       WiFi.scanNetworks(true);  // async scan
       wifiState = ST_CONNECT;
       wifiTimer = millis();
@@ -166,6 +167,7 @@ static void wifiConnectStep() {
               found = true;
               Serial.printf("  Found AP: \"%s\" RSSI=%d\n",
                             WIFI_SSID, WiFi.RSSI(i));
+              Serial.printf("  Connecting to \"%s\"...\n", WIFI_SSID);
               WiFi.begin(WIFI_SSID, WIFI_PASS);
               wifiState = ST_WAIT;
               wifiTimer = millis();
